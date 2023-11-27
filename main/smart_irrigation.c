@@ -1,9 +1,17 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "driver/i2c.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_system.h"
+#include "esp_adc_cal.h"
+#include "driver/gpio.h"
+#include "driver/adc.h"
 
 #define MLX90614_ADDR   0x5A
 
+// Definições do pino do sensor de umidade
+#define SENSOR_PIN GPIO_NUM_32
 /**
  * @brief Parâmetros de inicialização da conexão I2C
  * @param conf Ponteiro com os parâmetros
@@ -55,9 +63,22 @@ void app_main() {
 
     i2c_conf();
 
+    // Configurar a estrutura de configuração ADC
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_0);
+
 	while (1) {
         float temp = mlx90614_read_temp(I2C_NUM_0);
         printf("Temperature: %.2f°C\n", temp);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        // Ler o valor analógico do sensor
+        int valor_leitura = adc1_get_raw(ADC1_CHANNEL_4);
+
+        // Fazer algo com o valor lido (por exemplo, imprimir)
+        printf("Valor de umidade: %d\n", valor_leitura);
+
+        // Aguardar um tempo antes da próxima leitura
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo
 	}
 }
