@@ -28,12 +28,66 @@
 #include "driver/gpio.h"
 #include "driver/adc.h"
 
+#include <time.h>
+#include <sys/time.h>
+
 #include <esp_idf_version.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 1, 0)
 // Features supported in 4.1+
 #define ESP_NETIF_SUPPORTED
 #endif
 
+#define MLX90614_ADDR   0x5A
+
+struct tm data;//Cria a estrutura que contem as informacoes da data
+
+// Definições do pino do sensor de umidade
+#define SENSOR_PIN GPIO_NUM_32
+/**
+ * @brief Parâmetros de inicialização da conexão I2C
+ * @param conf Ponteiro com os parâmetros
+ */
+void i2c_conf ()
+{
+	i2c_config_t conf = {
+		.mode = I2C_MODE_MASTER,
+		.sda_io_num = 21,
+		.scl_io_num = 22,
+		.sda_pullup_en = GPIO_PULLUP_ENABLE,
+		.scl_pullup_en = GPIO_PULLUP_ENABLE,
+		.master.clk_speed = 50000,
+	};
+	i2c_param_config(I2C_NUM_0, &conf);
+
+	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+}
+
+
+/**
+ * @brief Leitura da Temperatura de um objeto
+ * @param MLX90614_ADDR Endereço do dispositivo
+ * @return Temperatura em graus celsius
+ */
+float mlx90614_read_temp(i2c_port_t i2c_num)
+{
+    uint8_t data[3];
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, MLX90614_ADDR << 1 | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, 0x07, true);     // Leitura da temperatura do objeto no endereço 0x07
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, MLX90614_ADDR << 1 | I2C_MASTER_READ, true);
+    i2c_master_read_byte(cmd, &data[0], I2C_MASTER_ACK);
+    i2c_master_read_byte(cmd, &data[1], I2C_MASTER_ACK);
+    i2c_master_read_byte(cmd, &data[2], I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+    float temp = (data[1] << 8) | data[0];
+    temp *= 0.02;
+    temp -= 273.15;
+    return temp;
+}
 
 static const char *TAG = "plant_data/esp32";
 
@@ -153,6 +207,10 @@ void aws_iot_task(void *param) {
     IoT_Publish_Message_Params paramsQOS0;
     IoT_Publish_Message_Params paramsQOS1;
 
+    struct timeval tv;          //Cria a estrutura temporaria para funcao abaixo.
+    tv.tv_sec = 1701900000;     //Atribui a data 06/12/2023 19:00:00
+    settimeofday(&tv, NULL);    //Configura o RTC para manter a data atribuida atualizada
+
     ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
 
     mqttInitParams.enableAutoReconnect = false; // We enable this later below
@@ -250,6 +308,11 @@ void aws_iot_task(void *param) {
     paramsQOS1.payload = (void *) cPayload;
     paramsQOS1.isRetained = 0;
 
+    // Obtém o endereço MAC
+    uint8_t mac_address[6];
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac_address);
+    uint16_t combined_mac = (mac_address[0] << 8) | mac_address[1]; //2 primeiros bytes do endereço MAC
+
     while((NETWORK_ATTEMPTING_RECONNECT == rc || NETWORK_RECONNECTED == rc || SUCCESS == rc)) {
 
         //Max time the yield function will wait for read messages
@@ -260,14 +323,26 @@ void aws_iot_task(void *param) {
         }
 
         ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS0)", i++);
+
+        float temp = mlx90614_read_temp(I2C_NUM_0);
+        int umid = adc1_get_raw(ADC1_CHANNEL_4);
+
+        time_t tt = time(NULL);     //Obtem o tempo atual em segundos. Utilize isso sempre que precisar obter o tempo atual
+        data = *gmtime(&tt);        //Converte o tempo atual e atribui na estrutura
+
+        // char data_formatada[64];
+        // strftime(data_formatada, 32, "%d/%m/%Y %H:%M:%S", &data);//Cria uma String formatada da estrutura "data"
+        // printf("\nUnix Time: %ld\n", (long)tt);//Mostra na Serial o Unix time
+        // printf("Data formatada: %s\n", data_formatada);//Mostra na Serial a data formatada
+
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        sprintf(cPayload, "{\n%s: %d,\n%s: %ld,\n%s: %.2f,\n%s: %d\n}", "\"espID\"", combined_mac, "\"timestamp\"", (long)tt, "\"temperatura\"", temp, "\"umidade\"", umid/*i++*/);
         paramsQOS0.payloadLen = strlen(cPayload);
         rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS0);
 
-        sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS1)", i++);
-        paramsQOS1.payloadLen = strlen(cPayload);
-        rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS1);
+        // sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS1)", i++);
+        // paramsQOS1.payloadLen = strlen(cPayload);
+        // rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS1);
         if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
             ESP_LOGW(TAG, "QOS1 publish ack not received.");
             rc = SUCCESS;
@@ -308,57 +383,6 @@ static void initialise_wifi(void)
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
-}
-
-
-#define MLX90614_ADDR   0x5A
-
-// Definições do pino do sensor de umidade
-#define SENSOR_PIN GPIO_NUM_32
-/**
- * @brief Parâmetros de inicialização da conexão I2C
- * @param conf Ponteiro com os parâmetros
- */
-void i2c_conf ()
-{
-	i2c_config_t conf = {
-		.mode = I2C_MODE_MASTER,
-		.sda_io_num = 21,
-		.scl_io_num = 22,
-		.sda_pullup_en = GPIO_PULLUP_ENABLE,
-		.scl_pullup_en = GPIO_PULLUP_ENABLE,
-		.master.clk_speed = 50000,
-	};
-	i2c_param_config(I2C_NUM_0, &conf);
-
-	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
-}
-
-
-/**
- * @brief Leitura da Temperatura de um objeto
- * @param MLX90614_ADDR Endereço do dispositivo
- * @return Temperatura em graus celsius
- */
-float mlx90614_read_temp(i2c_port_t i2c_num)
-{
-    uint8_t data[3];
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, MLX90614_ADDR << 1 | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x07, true);     // Leitura da temperatura do objeto no endereço 0x07
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, MLX90614_ADDR << 1 | I2C_MASTER_READ, true);
-    i2c_master_read_byte(cmd, &data[0], I2C_MASTER_ACK);
-    i2c_master_read_byte(cmd, &data[1], I2C_MASTER_ACK);
-    i2c_master_read_byte(cmd, &data[2], I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-    float temp = (data[1] << 8) | data[0];
-    temp *= 0.02;
-    temp -= 273.15;
-    return temp;
 }
 
 
