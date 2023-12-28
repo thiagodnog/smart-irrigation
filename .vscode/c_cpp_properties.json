@@ -2,7 +2,7 @@
     "configurations": [
         {
             "name": "ESP-IDF",
-            "compilerPath": "C:/Users/thiag/.espressif/tools/xtensa-esp32-elf/esp-12.2.0_20230208/xtensa-esp32-elf/bin/xtensa-esp32-elf-gcc.exe",
+            "compilerPath": "C:/Users/Admin/.espressif/tools/xtensa-esp32-elf/esp-12.2.0_20230208/xtensa-esp32-elf/bin/xtensa-esp32-elf-gcc.exe",
             "includePath": [
                 "${config:idf.espIdfPath}/components/**",
                 "${config:idf.espIdfPathWin}/components/**",
@@ -10,9 +10,9 @@
                 "${config:idf.espAdfPathWin}/components/**",
                 "${workspaceFolder}/build/config",
                 "${workspaceFolder}/**",
-                "C:/Users/thiag/esp/esp-idf/components/nvs_flash/include",
-                "C:/Users/thiag/esp/esp-idf/components/esp_wifi/include",
-                "C:/Users/thiag/esp/esp-idf/components/esp-aws-iot/aws-iot-device-sdk-embedded-C/include"
+                "C:/Users/Admin/esp/esp-idf/components/nvs_flash/include",
+                "C:/Users/Admin/esp/esp-idf/components/esp_wifi/include",
+                "C:/Users/Admin/esp/esp-idf/components/esp-aws-iot/aws-iot-device-sdk-embedded-C/include"
             ],
             "browse": {
                 "path": [

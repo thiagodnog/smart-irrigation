@@ -43,6 +43,43 @@ struct tm data;//Cria a estrutura que contem as informacoes da data
 
 // Definições do pino do sensor de umidade
 #define SENSOR_PIN GPIO_NUM_32
+
+
+#define FLOW_SENSOR_PIN GPIO_NUM_4 // Pino do sensor de fluxo de água
+#define PULSES_PER_LITER 450 // Pulsos por litro (Relação do sensor YF-S201)
+
+volatile int flow_count = 0;
+
+static void IRAM_ATTR flow_sensor_isr_handler(void* arg) {
+    flow_count++;
+}
+
+
+void init_flow_sensor() {
+    // Configuração do pino do sensor de fluxo como entrada
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << FLOW_SENSOR_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = GPIO_INTR_ANYEDGE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE
+    };
+    gpio_config(&io_conf);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(FLOW_SENSOR_PIN, flow_sensor_isr_handler, (void*)FLOW_SENSOR_PIN);
+}
+
+
+// Função para calcular a vazão em litros por minuto
+float display_flow_rate() {
+    const float pulses_per_minute = flow_count * 60.0; // Pulsos por minuto
+    const float flow_rate_lpm = pulses_per_minute / PULSES_PER_LITER; // Vazão em L/min
+
+    return flow_rate_lpm;
+}
+
+
 /**
  * @brief Parâmetros de inicialização da conexão I2C
  * @param conf Ponteiro com os parâmetros
@@ -326,6 +363,8 @@ void aws_iot_task(void *param) {
 
         float temp = mlx90614_read_temp(I2C_NUM_0);
         int umid = adc1_get_raw(ADC1_CHANNEL_4);
+        float vazao = display_flow_rate();
+        flow_count = 0;
 
         time_t tt = time(NULL);     //Obtem o tempo atual em segundos. Utilize isso sempre que precisar obter o tempo atual
         data = *gmtime(&tt);        //Converte o tempo atual e atribui na estrutura
@@ -335,8 +374,10 @@ void aws_iot_task(void *param) {
         // printf("\nUnix Time: %ld\n", (long)tt);//Mostra na Serial o Unix time
         // printf("Data formatada: %s\n", data_formatada);//Mostra na Serial a data formatada
 
+        printf("Vazao: %.2f L/min\n", vazao);
+
         vTaskDelay(5000 / portTICK_PERIOD_MS);
-        sprintf(cPayload, "{\n%s: %d,\n%s: %ld,\n%s: %.2f,\n%s: %d\n}", "\"espID\"", combined_mac, "\"timestamp\"", (long)tt, "\"temperatura\"", temp, "\"umidade\"", umid/*i++*/);
+        sprintf(cPayload, "{\n%s: %d,\n%s: %ld,\n%s: %.2f,\n%s: %d,\n%s: %.2f\n}", "\"espID\"", combined_mac, "\"timestamp\"", (long)tt, "\"temperatura\"", temp, "\"umidade\"", umid,"\"vazao\"", vazao/*i++*/);
         paramsQOS0.payloadLen = strlen(cPayload);
         rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS0);
 
@@ -388,6 +429,7 @@ static void initialise_wifi(void)
 
 void app_main() {
 
+    init_flow_sensor();
     i2c_conf();
 
     // Configurar a estrutura de configuração ADC
