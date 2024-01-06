@@ -362,7 +362,7 @@ void aws_iot_task(void *param) {
         ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
 
         float temp = mlx90614_read_temp(I2C_NUM_0);
-        int umid = adc1_get_raw(ADC1_CHANNEL_4);
+        int umid = adc1_get_raw(ADC1_CHANNEL_0);
         float vazao = display_flow_rate();
         flow_count = 0;
 
