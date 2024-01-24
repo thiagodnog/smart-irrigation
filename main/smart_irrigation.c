@@ -31,6 +31,14 @@
 #include <time.h>
 #include <sys/time.h>
 
+#include "esp_attr.h"
+#include "esp_sleep.h"
+#include "nvs_flash.h" 
+#include "protocol_examples_common.h"
+#include "esp_netif_sntp.h"
+#include "lwip/ip_addr.h"
+#include "esp_sntp.h"
+
 #include <esp_idf_version.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 1, 0)
 // Features supported in 4.1+
@@ -41,9 +49,13 @@
 
 struct tm data;//Cria a estrutura que contem as informacoes da data
 
+// 4095 - Totalmente Seco
+// 1600 - Submerso em água
 // Definições do pino do sensor de umidade
 #define SENSOR_PIN GPIO_NUM_32
 
+// Define o pino do relé
+#define PINO_RELE  0 // Substitua pelo pino que você conectou o relé
 
 #define FLOW_SENSOR_PIN GPIO_NUM_4 // Pino do sensor de fluxo de água
 #define PULSES_PER_LITER 450 // Pulsos por litro (Relação do sensor YF-S201)
@@ -54,6 +66,8 @@ static void IRAM_ATTR flow_sensor_isr_handler(void* arg) {
     flow_count++;
 }
 
+// Protótipo da função de controle da bomba
+void controlarBomba(bool ligar);
 
 void init_flow_sensor() {
     // Configuração do pino do sensor de fluxo como entrada
@@ -388,6 +402,17 @@ void aws_iot_task(void *param) {
             ESP_LOGW(TAG, "QOS1 publish ack not received.");
             rc = SUCCESS;
         }
+
+        if((temp > 25.0) && (umid > 2598 /*2598 valor de 60% de umidade*/ ))
+        {
+            // Liga a bomba
+            controlarBomba(false);
+        }
+        else
+        {
+            // Desliga a bomba
+            controlarBomba(true);
+        }
     }
 
     ESP_LOGE(TAG, "An error occurred in the main loop.");
@@ -432,6 +457,13 @@ void app_main() {
     init_flow_sensor();
     i2c_conf();
 
+    // Configuração do pino do relé como saída
+    gpio_config_t config = {
+        .pin_bit_mask = (1ULL<<PINO_RELE),
+        .mode = GPIO_MODE_OUTPUT
+    };
+    gpio_config(&config);
+
     // Configurar a estrutura de configuração ADC
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_0);
@@ -443,6 +475,7 @@ void app_main() {
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK( err );
+
 
     initialise_wifi();
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 5, NULL, 1);
@@ -461,4 +494,9 @@ void app_main() {
     //     // Aguardar um tempo antes da próxima leitura
     //     vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo
 	// }
+}
+
+void controlarBomba(bool ligar) {
+    // Atualiza o estado do relé para ligar ou desligar a bomba
+    gpio_set_level(PINO_RELE, ligar ? 1 : 0);
 }

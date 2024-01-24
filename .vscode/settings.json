@@ -2,7 +2,10 @@
     "files.associations": {
         "stdio.h": "c",
         "i2c.h": "c",
-        "aws_iot_mqtt_client_interface.h": "c"
+        "aws_iot_mqtt_client_interface.h": "c",
+        "esp_netif_sntp.h": "c",
+        "nvs_flash.h": "c",
+        "esp_sleep.h": "c"
     },
     "idf.portWin": "COM6",
     "idf.adapterTargetName": "esp32",
